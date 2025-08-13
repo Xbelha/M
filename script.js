@@ -514,40 +514,78 @@ function handleDateChange() {
 
 function submitOrder(event) {
     event.preventDefault();
+
     if (!validateCartAgainstPickupDate()) {
-        showToast(translations[currentLang].holidayProductOnNonHolidayAlert, 'error', 4000);
+        alert(translations[currentLang].holidayProductOnNonHolidayAlert);
         return;
     }
 
     const form = event.target;
     const formData = new FormData(form);
     const submitBtn = document.getElementById('submitOrderBtn');
-    const lastOrder = {
-        name: formData.get('name'),
-        phone: formData.get('phone'),
-        pickupDate: formData.get('pickupDate'),
-        pickupTime: formData.get('pickupTime'),
-        cart
-    };
+
+    const name = formData.get('name');
+    const phone = formData.get('phone');
+    const email = formData.get('email') || (currentLang === 'de' ? 'Nicht angegeben' : 'Not provided');
+    const pickupDate = formData.get('pickupDate');
+    const pickupTime = formData.get('pickupTime');
+    const userMessage = formData.get('message');
+
+    // Save order details to local storage for the thank you page
+    const lastOrder = { name, phone, pickupDate, pickupTime, cart };
     localStorage.setItem('lastOrder', JSON.stringify(lastOrder));
 
+    const cartSummary = cart.map(item =>
+        `${item.quantity} x ${currentLang === 'de' ? item.product.name_de : item.product.name_en} (${(item.product.price * item.quantity).toFixed(2)} €)`
+    ).join('\n');
     const total = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0).toFixed(2);
-    const cartSummary = cart.map(item => `${item.quantity} x ${currentLang === 'de' ? item.product.name_de : item.product.name_en}`).join('\n');
-    const emailBody = `Name: ${lastOrder.name}\nTelefon: ${lastOrder.phone}\nAbholung: ${lastOrder.pickupDate} um ${lastOrder.pickupTime}:00 Uhr\n\nBestellung:\n${cartSummary}\n\nGesamt: ${total} €\nNachricht: ${formData.get('message')}`;
-    
-    formData.append('subject', `Neue Bäckerei-Bestellung von ${lastOrder.name}`);
-    formData.append('text', emailBody);
+
+    const emailBody = `
+Name: ${name}
+Telefonnummer: ${phone}
+E-Mail: ${email}
+Abholdatum: ${pickupDate} um ${pickupTime}:00 Uhr
+
+Bestelldetails:
+${cartSummary}
+
+Gesamt: ${total} €
+--------------------------------
+Nachricht: ${userMessage}
+`;
+
+    const dataToSend = new FormData();
+    dataToSend.append('access_key', formData.get('access_key'));
+    dataToSend.append('subject', `Neue Bäckerei-Bestellung von ${name}`);
+    dataToSend.append('from_name', name);
+    dataToSend.append('text', emailBody); 
 
     submitBtn.disabled = true;
     submitBtn.textContent = currentLang === 'de' ? 'Wird gesendet...' : 'Sending...';
 
-    fetch(form.action, { method: form.method, body: formData, headers: { 'Accept': 'application/json' } })
-    .then(response => {
-        if (response.ok) window.location.href = 'thank-you.html';
-        else response.json().then(data => alert(data.message || 'Error'));
-    })
-    .catch(error => alert('Submission failed. Please check your connection.'))
-    .finally(() => {
+    fetch(form.action, {
+        method: form.method,
+        body: dataToSend,
+        headers: {
+            'Accept': 'application/json'
+        }
+    }).then(response => {
+        if (response.ok) {
+            // Redirect to thank you page on success
+            window.location.href = 'thank-you.html';
+        } else {
+            response.json().then(data => {
+                if (Object.hasOwn(data, 'errors')) {
+                    alert(data["errors"].map(error => error["message"]).join(", "));
+                } else {
+                    alert(currentLang === 'de' ? 'Ein Fehler ist aufgetreten. Bitte versuchen Sie es per Telefon.' : 'An error occurred. Please try ordering by phone.');
+                }
+            })
+        }
+    }).catch(error => {
+        console.error('Error submitting order:', error);
+        alert(currentLang === 'de' ? 'Die Bestellung konnte nicht gesendet werden. Bitte prüfen Sie Ihre Internetverbindung oder bestellen Sie per Telefon.' : 'The order could not be sent. Please check your internet connection or order by phone.');
+    }).finally(() => {
         submitBtn.disabled = false;
         applyLanguage();
     });
@@ -582,4 +620,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('orderForm').addEventListener('submit', submitOrder);
     applyLanguage();
     updateCartCount();
+
 });
